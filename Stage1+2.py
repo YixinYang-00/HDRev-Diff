@@ -16,19 +16,17 @@ import torch
 import torch.nn.functional as F
 import torch.distributed as distributed
 from torch.utils.data.distributed import DistributedSampler
-from torch.nn.parallel import DistributedDataParallel
 
 import transformers
 from transformers import CLIPTextModel, CLIPTokenizer
 
 import diffusers
-from diffusers import DDIMScheduler, LMSDiscreteScheduler, AutoencoderKL
+from diffusers import DDIMScheduler, AutoencoderKL
 from diffusers.models import UNet2DConditionModel, ControlNetModel
 from diffusers.optimization import get_scheduler
-from diffusers.models.lora import LoRAConv2dLayer, LoRALinearLayer
 
 from data_processing import create_dataset
-from utils import save_image, EDILayer, tonemap, Gaussian_filtering, VGGLoss, wavelet_combine, wavelet_decomposition, FFTLoss, GANLoss, Sobel_pytorch, rgb_to_grayscale, local_int_align_satDark_hist_norm_RGB
+from utils import save_image, tonemap, VGGLoss, GANLoss
 from networks import OursControlNetModel, HDRev_Encoder, HDRev_Encoder_stage2
 from pipeline import create_pipeline
 
@@ -82,15 +80,14 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
     # create scheduler and models
     noise_scheduler = DDIMScheduler(**OmegaConf.to_container(config.noise_scheduler_kwargs))
     
-    vae = AutoencoderKL.from_pretrained(config.pretrained_model_path, cache_dir='/openbayes/input/input0/pretrained', subfolder='vae', low_cpu_mem_usage=False, device_map=None, local_files_only=True)
-    tokenizer = CLIPTokenizer.from_pretrained(config.pretrained_model_path, cache_dir='/openbayes/input/input0/pretrained', subfolder='tokenizer', local_files_only=True)
-    text_encoder = CLIPTextModel.from_pretrained(config.pretrained_model_path, cache_dir='/openbayes/input/input0/pretrained', subfolder='text_encoder', local_files_only=True)
-    unet = UNet2DConditionModel.from_pretrained(config.pretrained_model_path, cache_dir='/openbayes/input/input0/pretrained', subfolder='unet', low_cpu_mem_usage=False, device_map=None, local_files_only=True) # inpainting version?
-    controlnet = OursControlNetModel.from_pretrained(config.pretrained_controlnet_model_path, cache_dir='/openbayes/input/input0/pretrained',
+    vae = AutoencoderKL.from_pretrained(config.pretrained_model_path, cache_dir='pretrained', subfolder='vae', low_cpu_mem_usage=False, device_map=None)
+    tokenizer = CLIPTokenizer.from_pretrained(config.pretrained_model_path, cache_dir='pretrained', subfolder='tokenizer')
+    text_encoder = CLIPTextModel.from_pretrained(config.pretrained_model_path, cache_dir='pretrained', subfolder='text_encoder')
+    unet = UNet2DConditionModel.from_pretrained(config.pretrained_model_path, cache_dir='pretrained', subfolder='unet', low_cpu_mem_usage=False, device_map=None) # inpainting version?
+    controlnet = OursControlNetModel.from_pretrained(config.pretrained_controlnet_model_path, cache_dir='pretrained',
                                                  cross_attention_dim=1024 if config.noise_scheduler_kwargs.prediction_type=='v_prediction' else 768,\
-                                                  conditioning_channels=config.conditioning_channels, ignore_mismatched_sizes=True, low_cpu_mem_usage=False, local_files_only=True)
+                                                  conditioning_channels=config.conditioning_channels, ignore_mismatched_sizes=True, low_cpu_mem_usage=False)
     cond_encoder = HDRev_Encoder(num_bins=config.train_dataset.num_bins)
-    upsampler = HDRev_Encoder_stage2(in_channels=vae.config.latent_channels)
     
     if pretrained != "":
         if not os.path.exists(pretrained):
@@ -107,18 +104,12 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
         print(m, u)
         print(f'cond_encoder:\n###### missing keys: {len(m)}; \n###### unexpected keys: {len(u)}')
         
-        # state_dict_upsample = torch.load(pretrained, map_location='cpu')['state_dict_upsample']
-        # m, u = upsampler.load_state_dict(state_dict_upsample) 
-        # print(m, u)
-        # print(f'upsampler:\n###### missing keys: {len(m)}; \n###### unexpected keys: {len(u)}')
-
     # process trainable and frozen params
     vae.requires_grad_(False)
     text_encoder.requires_grad_(False)
     unet.requires_grad_(False)
     controlnet.requires_grad_(False)
     cond_encoder.requires_grad_(False)
-    upsampler.requires_grad_(False)
 
     if config.train_controlnet:
         for name, param in controlnet.named_parameters():
@@ -129,9 +120,6 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
             param.requires_grad = True
 
     trainable_params = []
-    upsampler.requires_grad_(True)
-    trainable_params += list(filter(lambda p: p.requires_grad, upsampler.parameters()))
-
     # crate optimizer
     trainable_params += list(filter(lambda p: p.requires_grad, controlnet.parameters())) \
                        + list(filter(lambda p: p.requires_grad, cond_encoder.parameters()))
@@ -163,7 +151,6 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
     unet.to(local_rank)
     controlnet.to(local_rank)
     cond_encoder.to(local_rank)
-    upsampler.to(local_rank)
 
     # create dataset and dataloader
     dataset = create_dataset(config.train_dataset)
@@ -204,7 +191,7 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
     
     kwargs = {'unet':unet, 'vae': vae, 'tokenizer':tokenizer, 'text_encoder':text_encoder,
               'controlnet':controlnet, 'cond_encoder': cond_encoder, 'scheduler':noise_scheduler, 'isVal':True, 
-              'upsampler':upsampler}
+              'upsampler':vae}
     validation_pipeline = create_pipeline(config.validation_pipeline, kwargs).to("cuda")
     validation_pipeline.enable_vae_slicing()
 
@@ -254,7 +241,6 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
         extra_step_kwargs['generator'] = torch.Generator(device=local_rank)
 
     vgg_loss = VGGLoss().to(local_rank)
-    # fft_loss = FFTLoss().to(local_rank)
 
     for epoch in range(first_epoch, num_train_epochs):
         dataloader.sampler.set_epoch(epoch)
@@ -319,23 +305,13 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
             original_pred = torch.cat(original_pred_list)
             img_pred = vae.decode(original_pred / vae.config.scaling_factor).sample
 
-            # sub_out = torch.clamp((img_pred + 1) / 2, 0, 1)
-            # sub_gt = torch.clamp((pixel_values.detach() + 1) / 2, 0, 1)
-            # new_gt = local_int_align_satDark_hist_norm_RGB(sub_gt, sub_out)
-            # new_gt = new_gt.to(local_rank) * 2 - 1
-            
-            out_img = upsampler(condition_list, original_pred, img_pred)
-
             noise_loss = F.mse_loss(model_pred.float(), target.float(), reduction='mean')
-            upsample_loss = (vgg_loss(out_img.float(), pixel_values.float()).mean() * 0.1 + \
-                          F.mse_loss(out_img.float(), pixel_values.float(), reduction='mean')) * 0.1
-            loss = noise_loss + upsample_loss
+            loss = noise_loss
 
             optimizer.zero_grad()
             loss.backward()
             # torch.nn.utils.clip_grad_norm_(trainable_params, config.max_grad_norm)
             optimizer.step()
-            # print(optimizer.param_groups[0]['lr'])
 
             lr_scheduler.step()
             progress_bar.update(1)
@@ -343,7 +319,7 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
 
             # logging
             if is_main_process and (not debug) and use_wandb:
-                wandb.log({'noise_loss': noise_loss.item(), 'upsampler_loss': upsample_loss.item()}, step=global_step)
+                wandb.log({'noise_loss': noise_loss.item()}, step=global_step)
 
             # saving
             if is_main_process and (global_step % checkpointing_steps == 0 or step == len(dataloader) - 1):
@@ -352,10 +328,7 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
                     'epoch': epoch,
                     'global_step': global_step,
                     'state_dict_controlnet': controlnet.state_dict(),
-                    # 'state_dict_unet': unet.module.state_dict()
-                    # 'state_dict_vae': vae.state_dict(),
                     'state_dict_cond': cond_encoder.state_dict(),
-                    'state_dict_upsample': upsampler.state_dict()
                 }
                 if step == len(dataloader) - 1:
                     if epoch % 10 == 0:
@@ -378,31 +351,14 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
                                                 condition_events=batch['pixel_events'], 
                                                 height=height, width=width, 
                                                 generators=generator, 
-                                                # latents=latents,
                                                 **config.validation_setup)
 
-                # import cv2
-                # from utils import tensor2im
-                # cv2.imwrite('a.jpg', tensor2im(batch['pixel_images']))
-                # cv2.imwrite('b.jpg', tensor2im(batch['gts']))
-                # cv2.imwrite('c.jpg', tensor2im(sample))
                 sub_out = torch.clamp((sample.detach() + 1) / 2, 0, 1)
                 sub_gt = torch.clamp((pixel_values.detach() + 1) / 2, 0, 1)
-                new_gt = local_int_align_satDark_hist_norm_RGB(sub_gt, sub_out)
-                new_gt = new_gt.to(local_rank) * 2 - 1
             
                 visuals = {}
-                # high_lat, low_lat = wavelet_decomposition(sample)
-                # high_gt, low_gt = wavelet_decomposition(pixel_values)
-                # high_cnn, low_cnn = wavelet_decomposition(out_img)
-                # combine = wavelet_combine(high_cnn, low_lat)
-                # combine_gt = wavelet_combine(high_gt, low_lat)
-                # visuals[f'{global_step}_results_combine'] = (combine + 1) / 2
-                # visuals[f'{global_step}_combine_gt'] = (combine_gt + 1) / 2
-                visuals[f'{global_step}_new_gt'] = (new_gt + 1) / 2
                 visuals[f'{global_step}_results_tm'] = (results + 1) / 2
                 visuals[f'{global_step}_results_sample'] = (sample + 1) / 2
-                # visuals[f'{global_step}_results_low'] = (low_lat + 1) / 2
                 visuals[f'{global_step}_events'] = batch['pixel_events']
                 visuals[f'{global_step}_images'] = batch['pixel_images']
                 visuals[f'{global_step}_gt'] = (pixel_values + 1) / 2

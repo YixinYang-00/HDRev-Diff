@@ -1,7 +1,6 @@
 import numpy as np
 import torch.nn.functional as F
 from matplotlib import pyplot as plt
-from pytorch_histogram_matching import Histogram_Matching
 import cv2
 import torch
 if __name__ == '__main__':
@@ -458,9 +457,6 @@ def local_int_align_satDark_hist_norm_sat(indata, ref, args):
 
 
 def local_int_align_satDark_hist_norm_RGB(src_rgb, dst_rgb):  
-    # hist_match = Histogram_Matching(differentiable=True)
-    # result = hist_match(src_rgb, dst_rgb)
-    # return result
     src_rgb, dst_rgb = src_rgb.cpu(), dst_rgb.cpu()
     args = predefined_args()
     b, c = src_rgb.shape[:2]

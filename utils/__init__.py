@@ -11,25 +11,17 @@ import torch.nn.functional as F
 import scipy.stats as st
 from .eventslicer import EventSlicer
 from .camera import load_calib_data
-from .wavelet import *
 from .histm import *
-from .deblur_edi import deblur
 
 eps = 1e-6
 
 def HDRReader(path):
     if path.endswith('.hdr'):
         hdr = cv2.imread(path, flags=cv2.IMREAD_ANYDEPTH)[:, :, ::-1].copy()
-        # exit()
     elif path.endswith('.exr'):
-        hdr = readEXR(path)#[:, :, ::-1]
+        hdr = readEXR(path)
     else:
-        # print(f'warning: {path.split(".")[-1]} is not an HDR file type, {path}')
         hdr = cv2.imread(path)[:, :, ::-1] / 255.0
-    # print(path)
-    # hdr = (hdr - np.min(hdr)) / (np.max(hdr) - np.min(hdr))
-    # cv2.imwrite('a.jpg', (hdr[:, :, ::-1] ** (1 / 2.2)) * 255)
-    # exit()
     return hdr
 
 def add_PG_noise(img, sigma_s=None, sigma_c=None):
@@ -69,7 +61,7 @@ def fitRF(func_idx):
 def ldr_generator(hdr, under_over_ratio, exposure=None, a=None, b=None, sig_s=None, sig_c=None, augmentation=False, fixed=False):
     if exposure is None:
         if fixed:
-            seed = 1# * 0.9 + 0.1
+            seed = 1
         else:
             seed = np.random.sample()
             
@@ -88,7 +80,7 @@ def ldr_generator(hdr, under_over_ratio, exposure=None, a=None, b=None, sig_s=No
     if augmentation:
         t_img, sig_s, sig_c = add_PG_noise(t_img, sig_s, sig_c)
     
-    # t_img = func(t_img, a, b)
+    t_img = func(t_img, a, b)
     f_img = np.clip(t_img, 0, 1)
     i_img = (f_img * 255).astype(np.uint8)
     return (i_img / 255.0).astype(np.float32), {'exposure': exposure, 
@@ -107,9 +99,6 @@ def tensor2im(input_img):
         else:
             return input_img
         image_numpy = image_tensor[0].cpu().float().numpy()
-        # print(np.max(image_numpy), np.min(image_numpy))
-        # image_numpy = image_numpy #** (1 / 2.2)
-        # image_numpy = (image_numpy - np.min(image_numpy)) / (np.max(image_numpy) - np.min(image_numpy))
         image_numpy = np.transpose(image_numpy, (1, 2, 0)) * 255
     else:
         image_numpy = input_img

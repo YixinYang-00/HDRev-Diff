@@ -1,5 +1,5 @@
 output_dir: 'checkpoints'
-pretrained_model_path: "runwayml/stable-diffusion-v1-5"
+pretrained_model_path: "stable-diffusion-v1-5/stable-diffusion-v1-5"
 pretrained_controlnet_model_path: 'lllyasviel/control_v11e_sd15_ip2p' 
 gradient_checkpointing: False
 
@@ -42,7 +42,7 @@ noise_scheduler_kwargs:
 
 train_dataset:
   dataset_type: evs_image_h5
-  dataroot: "/openbayes/input/input0/train_collect/"
+  dataroot: "train_collect/"
 
   isTrain: True
   patch_size: [512, 512]
