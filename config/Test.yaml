@@ -1,0 +1,54 @@
+output_dir: 'results'
+pretrained_model_path: "runwayml/stable-diffusion-v1-5"
+pretrained_controlnet_model_path: 'lllyasviel/control_v11e_sd15_ip2p' 
+
+gradient_checkpointing: False
+ 
+# conditioning_channels: 512
+conditioning_channels: [64, 128, 256, 512]
+ 
+global_seed: 63
+ 
+batch_size: 1
+num_workers: 4
+ 
+noise_scheduler_kwargs:
+  num_train_timesteps: 1000
+  beta_start: 0.00085
+  beta_end: 0.012
+  beta_schedule: "scaled_linear"
+  rescale_betas_zero_snr: False
+  prediction_type: "epsilon"
+test_dataset:
+
+  # dataset_type: evs_image_h5single
+  # dataroot: "/openbayes/input/input0/inputs_w_latents_real.h5"
+
+  dataset_type: evs_image_h5_single_Test
+  dataroot: "/openbayes/input/input0/test_collect.h5"
+  # dataroot: "/openbayes/input/input1/data_1011/017_stair.h5"
+  isTrain: False
+
+  # dataset_type: evs_image_h5_test
+  # dataroot: '/openbayes/input/input1/HJ-PAMI/HES-HDR_dataset/Event_based_dataset_collect.h5'
+  # dataroot: '/openbayes/input/input1/dsec.h5'
+  # isTrain: False
+
+  # dataset_type: evs_image_h5
+  # dataroot: "/openbayes/input/input0/train_collect/"
+  # isTrain: True
+  patch_size: [512, 512]
+  video_length: 1
+  event_norm: True
+  num_bins: 5
+  max_dataset_size: 10000000
+  under_over_ratio: 0
+  event_representation: voxel_grid
+ 
+validation_pipeline: Stage
+validation_steps: 1000
+validation_setup:
+  guidance_scale: 1.5
+  num_inference_steps: 9
+  eta: 1.
+  

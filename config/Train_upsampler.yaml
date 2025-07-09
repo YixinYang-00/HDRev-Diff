@@ -1,0 +1,67 @@
+output_dir: checkpoints
+pretrained_model_path: runwayml/stable-diffusion-v1-5
+pretrained_controlnet_model_path: lllyasviel/control_v11e_sd15_ip2p
+gradient_checkpointing: false
+use_image_prompt: false
+control_type: evs+ldr
+conditioning_channels: 512
+learning_rate: 1.0e-04
+lr_sheduler_type: linear
+lr_warmup_steps: 0
+max_grad_norm: 1.0
+adam_beta1: 0.99
+adam_beta2: 0.999
+adam_weight_decay: 0.01
+adam_epsilon: 1.0e-08
+global_seed: 63
+batch_size: 1
+num_workers: 16
+max_train_epoch: -1
+max_train_steps: 20000
+checpointing_epoch: -1
+checkpointing_steps: 10000
+gradient_accumulation_steps: 1
+cfg_random_null_text: true
+cfg_random_null_text_ratio: 0.1
+train_controlnet: true
+controlnet_trainable_modules:
+- ''
+train_vae_decoder: false
+vae_trainable_modules:
+- fusion_layer
+vae_lora_injection:
+- UpDecoderBlock2D
+noise_scheduler_kwargs:
+  num_train_timesteps: 1000
+  beta_start: 0.00085
+  beta_end: 0.012
+  beta_schedule: scaled_linear
+  rescale_betas_zero_snr: false
+  prediction_type: epsilon
+train_dataset:
+  dataset_type: evs_image_h5single
+  dataroot: /openbayes/input/input0/predecode/Test_-2025-05-12T05-27-08/inputs_w_latents.h5 
+  # dataroot: /openbayes/input/input1/denoisefin_wUnder01.h5
+  # dataroot: /openbayes/input/input0/predecode/Test_continue_newAdapt-2024-12-03T13-14-11/inputs_w_latents.h5
+  # dataroot: /openbayes/input/input0/predecode/Test_denoiseContinue_/openbayes/input/input1/denoise_continue.ckpt-2024-11-11T10-09-49/inputs_w_latents.h5
+  # dataroot: /openbayes/input/input0/predecode/Test_-2024-11-12T17-13-12/inputs_w_latents_woFusion.h5
+  # dataroot: /openbayes/input/input0/predecode/Test_continue_/openbayes/input/input1/denoise_continue.ckpt-2024-11-14T03-12-22/inputs_w_latents.h5
+  # dataroot: /openbayes/input/input1/continue_new.h5
+  # dataroot: /openbayes/input/input0/predecode/Test__/openbayes/input/input0/woUp.ckpt-2024-11-07T05-30-26/inputs_w_latents.h5
+  # dataroot: /openbayes/input/input0/predecode/Test_removeFusion-2024-11-19T07-57-41/inputs_w_latents.h5
+  isTrain: true
+  patch_size:
+  - 512
+  - 512
+  video_length: 1
+  event_norm: true
+  num_bins: 5
+  max_dataset_size: 20000
+  under_over_ratio: 0.2
+  event_representation: voxel_grid
+validation_pipeline: Color
+validation_steps: 1000
+validation_setup:
+  guidance_scale: 7.5
+  num_inference_steps: 9
+  eta: 1.0

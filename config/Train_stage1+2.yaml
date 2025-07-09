@@ -1,0 +1,61 @@
+output_dir: 'checkpoints'
+pretrained_model_path: "runwayml/stable-diffusion-v1-5"
+pretrained_controlnet_model_path: 'lllyasviel/control_v11e_sd15_ip2p' 
+gradient_checkpointing: False
+
+conditioning_channels: [64, 128, 256, 512]
+
+learning_rate: 0.00001
+lr_sheduler_type: 'linear'
+lr_warmup_steps: 0
+max_grad_norm: 1.0
+adam_beta1: 0.99
+adam_beta2: 0.999
+adam_weight_decay: 1.e-2
+adam_epsilon: 1.e-8
+
+global_seed: 63
+
+batch_size: 1
+num_workers: 24
+max_train_epoch: -1
+max_train_steps: 50000
+checpointing_epoch: -1
+checkpointing_steps: 1000
+gradient_accumulation_steps: 1
+
+train_unet: True
+unet_trainable_modules:
+  - "conv_out"
+
+train_controlnet: True
+controlnet_trainable_modules:
+  - ""
+
+noise_scheduler_kwargs:
+  num_train_timesteps: 1000
+  beta_start: 0.00085
+  beta_end: 0.012
+  beta_schedule: "scaled_linear"
+  rescale_betas_zero_snr: False
+  prediction_type: "epsilon"
+
+train_dataset:
+  dataset_type: evs_image_h5
+  dataroot: "/openbayes/input/input0/train_collect/"
+
+  isTrain: True
+  patch_size: [512, 512]
+  video_length: 1
+  event_norm: True 
+  num_bins: 5
+  max_dataset_size: 12000
+  under_over_ratio: 0.05
+  event_representation: voxel_grid
+
+validation_pipeline: Stage
+validation_steps: 1
+validation_setup:
+  num_inference_steps: 9
+  eta: 1.0
+
