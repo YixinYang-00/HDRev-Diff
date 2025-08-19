@@ -1,14 +1,7 @@
-import os
-import cv2
 import h5py
 import torch
-import random
-import fnmatch
 import numpy as np
-import torch.nn.functional as F
-from torchvision import transforms
 from .base_dataset import BaseDataset
-from utils import HDRReader, ldr_generator, tensor2im, EventSlicer, Sobel_pytorch, whiteBalance, paired_random_crop, EDILayer
  
 eps = 1e-8
  
@@ -41,11 +34,9 @@ class evsImageH5SingleDataset(BaseDataset):
             self.under_over_ratio = opt.under_over_ratio
             
         self.files, self.video_names = [], []
-        if not self.isTrain:
-            self.File = h5py.File(opt.dataroot, 'r')['/mnt/Nas-CP-share/sherry/datasets/desc/test/']
-        else:
-            self.File = h5py.File(opt.dataroot, 'r')['/openbayes/input/input0/train_collect/']
+        self.File = h5py.File(opt.dataroot, 'r')
         self.files = list(self.File.keys())
+
         self.MAX_LENGTHS = opt.max_dataset_size
  
         self.files = self.files[:self.MAX_LENGTHS]
@@ -60,7 +51,7 @@ class evsImageH5SingleDataset(BaseDataset):
         idx = index % self.dataset_size
         video_name = self.files[idx]
         File = self.File[video_name]
-        img = np.array(File['new_gt'])
+        img = np.array(File['gt'])
 
         ldr = np.array(File['ldr'])
 

@@ -1,5 +1,4 @@
 import importlib
-import torch.utils.data as data
 from diffusers.pipelines.pipeline_utils import DiffusionPipeline
 
 def create_pipeline(pipeline_type, kwargs):

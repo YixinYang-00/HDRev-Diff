@@ -22,7 +22,7 @@ class BaseDataset(data.Dataset, ABC):
         self.root = opt.dataroot
 
     @staticmethod
-    def modify_commandline_options(parser, is_train):
+    def modify_commandline_options(parser):
         """Add new dataset-specific options, and rewrite default values for existing options.
 
         Parameters:

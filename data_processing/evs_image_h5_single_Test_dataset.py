@@ -1,14 +1,9 @@
-import os
-import cv2
 import h5py
 import torch
-import random
-import fnmatch
 import numpy as np
 import torch.nn.functional as tF
-from torchvision import transforms
 from .base_dataset import BaseDataset
-from utils import HDRReader, ldr_generator, tensor2im, EventSlicer, Sobel_pytorch, whiteBalance, paired_random_crop, EDILayer, deblur, Sobel_pytorch, rgb_to_grayscale_numpy
+from utils import ldr_generator, whiteBalance, paired_random_crop, rgb_to_grayscale_numpy
 
 eps = 1e-8
 
@@ -54,15 +49,10 @@ class evsImageH5SingleTestDataset(BaseDataset):
 
         self.dataset_size = len(self.files)
         if self.isTrain:
-            self.augmentation_transforms = transforms.Compose([
-                transforms.RandomHorizontalFlip(),
-                transforms.RandomCrop(self.patch_size)
-            ])
             self.height, self.width =  (self.patch_size, self.patch_size) if isinstance(self.patch_size, int) \
                                       else self.patch_size
         else:
             self.height, self.width = opt.patch_size
-        self.data_transforms = transforms.Normalize([0.5, 0.5, 0.5], [0.5, 0.5, 0.5])
 
     def __len__(self):        
         return self.dataset_size   
@@ -73,7 +63,7 @@ class evsImageH5SingleTestDataset(BaseDataset):
         f_index = self.files[idx]
         File = self.File[video_name]
         
-        events, gts, ldrs, prompts = [], [], [], []
+        events, gts, ldrs = [], [], []
         ldr_params = {'exposure': None}
         for file_idx in f_index:
             img = np.array(File[file_idx]['gt'])
@@ -94,7 +84,6 @@ class evsImageH5SingleTestDataset(BaseDataset):
                 
             t, x, y, p = event_representation[:, 0], event_representation[:, 1], event_representation[:, 2], event_representation[:, 3]
             p = p * 2 - 1
-            deblur_img = deblur(np.transpose(ldr, (1, 2, 0)), np.stack([t, x, y, p], axis=-1), 10)
             if self.event_representation == 'voxel_grid':
                 event_representation = self.__events_to_voxel_grid(x, y, p, t, self.num_bins, ev_width, ev_height)
             if self.event_norm:
@@ -107,29 +96,22 @@ class evsImageH5SingleTestDataset(BaseDataset):
             
             ldr = torch.from_numpy(ldr).float()
             img = torch.from_numpy(img).float()
-            deblur_img = torch.from_numpy(deblur_img.transpose(2, 0, 1)).float()
             
             if self.isTrain:
-                img, [event_representation, ldr, deblur_img] = paired_random_crop(img.permute(1, 2, 0), [event_representation.permute(1, 2, 0), ldr.permute(1, 2, 0), deblur_img], self.height, None)
-                img, event_representation, ldr, deblur_img = img.permute(2, 0, 1), event_representation.permute(2, 0, 1), ldr.permute(2, 0, 1), deblur_img.permute(2, 0, 1)
+                img, [event_representation, ldr] = paired_random_crop(img.permute(1, 2, 0), [event_representation.permute(1, 2, 0), ldr.permute(1, 2, 0)], self.height, None)
+                img, event_representation, ldr = img.permute(2, 0, 1), event_representation.permute(2, 0, 1), ldr.permute(2, 0, 1)
             else:
                 img = tF.interpolate(img.unsqueeze(0), (self.height, self.width))[0]
                 event_representation = tF.interpolate(event_representation.unsqueeze(0), (self.height, self.width))[0]
                 ldr = tF.interpolate(ldr.unsqueeze(0), (self.height, self.width))[0]
-                deblur_img = tF.interpolate(deblur_img.unsqueeze(0), (self.height, self.width))[0]
-
-            c, h, w = deblur_img.shape
-            deblur_img = Sobel_pytorch(deblur_img.unsqueeze(0))[0].reshape(-1, h, w)
 
             events.append(event_representation)
             gts.append(img)
             ldrs.append(ldr)
-            prompts.append(deblur_img)
             
         return {
             'save_path': '-'.join([video_name, f'{idx}']),
             'pixel_events': events[0],
-            'prompt_image': prompts[0],
             'pixel_images': ldrs[0],
             'gts': gts[0],
             'text': "",

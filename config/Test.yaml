@@ -1,17 +1,37 @@
 output_dir: 'results'
-pretrained_model_path: "runwayml/stable-diffusion-v1-5"
+pretrained_model_path: "stable-diffusion-v1-5/stable-diffusion-v1-5"
 pretrained_controlnet_model_path: 'lllyasviel/control_v11e_sd15_ip2p' 
-
 gradient_checkpointing: False
- 
-# conditioning_channels: 512
+
 conditioning_channels: [64, 128, 256, 512]
- 
+
+learning_rate: 0.00001
+lr_sheduler_type: 'linear'
+lr_warmup_steps: 0
+max_grad_norm: 1.0
+adam_beta1: 0.99
+adam_beta2: 0.999
+adam_weight_decay: 1.e-2
+adam_epsilon: 1.e-8
+
 global_seed: 63
- 
+
 batch_size: 1
-num_workers: 4
- 
+num_workers: 24
+max_train_epoch: -1
+max_train_steps: 50000
+checpointing_epoch: -1
+checkpointing_steps: 1000
+gradient_accumulation_steps: 1
+
+train_unet: True
+unet_trainable_modules:
+  - "conv_out"
+
+train_controlnet: True
+controlnet_trainable_modules:
+  - ""
+
 noise_scheduler_kwargs:
   num_train_timesteps: 1000
   beta_start: 0.00085
@@ -19,36 +39,23 @@ noise_scheduler_kwargs:
   beta_schedule: "scaled_linear"
   rescale_betas_zero_snr: False
   prediction_type: "epsilon"
+
 test_dataset:
-
-  # dataset_type: evs_image_h5single
-  # dataroot: "/openbayes/input/input0/inputs_w_latents_real.h5"
-
   dataset_type: evs_image_h5_single_Test
-  dataroot: "/openbayes/input/input0/test_collect.h5"
-  # dataroot: "/openbayes/input/input1/data_1011/017_stair.h5"
-  isTrain: False
+  dataroot: "test_collect.h5"
 
-  # dataset_type: evs_image_h5_test
-  # dataroot: '/openbayes/input/input1/HJ-PAMI/HES-HDR_dataset/Event_based_dataset_collect.h5'
-  # dataroot: '/openbayes/input/input1/dsec.h5'
-  # isTrain: False
-
-  # dataset_type: evs_image_h5
-  # dataroot: "/openbayes/input/input0/train_collect/"
-  # isTrain: True
+  isTrain: True
   patch_size: [512, 512]
   video_length: 1
-  event_norm: True
+  event_norm: True 
   num_bins: 5
-  max_dataset_size: 10000000
-  under_over_ratio: 0
+  max_dataset_size: 10
+  under_over_ratio: 0.05
   event_representation: voxel_grid
- 
+
 validation_pipeline: Stage
-validation_steps: 1000
+validation_steps: 1
 validation_setup:
-  guidance_scale: 1.5
   num_inference_steps: 9
-  eta: 1.
-  
+  eta: 1.0
+

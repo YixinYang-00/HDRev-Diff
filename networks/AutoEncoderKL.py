@@ -32,9 +32,7 @@ from diffusers.models.modeling_utils import ModelMixin
 from diffusers.models.autoencoders.vae import Decoder, DecoderOutput, DiagonalGaussianDistribution, Encoder
 
 from diffusers.models.unets.unet_2d_blocks import (
-    AutoencoderTinyBlock,
     UNetMidBlock2D,
-    get_down_block,
     get_up_block,
 )
 

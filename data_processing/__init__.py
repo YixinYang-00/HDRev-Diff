@@ -11,7 +11,6 @@ ADataset have four functions:
 please specify the dataset class in command by '--dataset A'.
 '''
 import importlib
-import torch.utils.data as data
 from data_processing.base_dataset import BaseDataset
 
 def create_dataset(opt):

@@ -1,11 +1,7 @@
 import datetime
 import argparse
-import inspect
-import random
-import lpips
 import wandb
 import math
-import time
 import os
 
 from tqdm import tqdm
@@ -15,63 +11,24 @@ from omegaconf import OmegaConf
 import torch
 import torch.nn.functional as F
 import torch.distributed as distributed
-from torch.utils.data.distributed import DistributedSampler
 
-import transformers
 from transformers import CLIPTextModel, CLIPTokenizer
 
 import diffusers
 from diffusers import DDIMScheduler, AutoencoderKL
-from diffusers.models import UNet2DConditionModel, ControlNetModel
+from diffusers.models import UNet2DConditionModel
 from diffusers.optimization import get_scheduler
 
 from data_processing import create_dataset
-from utils import save_image, tonemap, VGGLoss, GANLoss
-from networks import OursControlNetModel, HDRev_Encoder, HDRev_Encoder_stage2
+from utils import save_image, tonemap, GANLoss
+from networks import OursControlNetModel, HDRev_Encoder
 from pipeline import create_pipeline
 
 eps = 1e-8
 
-def init_dist(launcher='slurm', backend='nccl'):
-    if launcher == 'pytorch':
-        rank = int(os.environ['RANK'])
-        num_gpus = torch.cuda.device_count()
-        local_rank = rank % num_gpus
-        torch.cuda.set_device(local_rank)
-        distributed.init_process_group(backend=backend)
-    elif launcher == 'slurm':
-        proc_id = int(os.environ['SLURM_PROCID'])
-        ntasks = int(os.environ['SLURM_NTASKS'])
-        node_list = os.environ['SLURM_NODELIST']
-        num_gpus = torch.cuda.device_count()
-        local_rank = proc_id % num_gpus
-        torch.cuda.set_device(local_rank)
-        os.environ['WORLD_SIZE'] = str(ntasks)
-        os.environ['RANK'] = str(proc_id)
-        distributed.init_process_group(backend=backend)
-    else:
-        raise NotImplementedError(f'Not implemented launcher type {launcher}')
+def main(name, config, use_wandb=False, debug=False, pretrained=""):
+    device = 'cuda'
 
-    return local_rank
-
-
-def get_condition_input(config, batch):
-    if config.control_type == 'evs':
-        ret = batch['pixel_events']
-    elif config.control_type == 'ldr':
-        ret = batch['pixel_images']
-    elif config.control_type == 'evs+ldr':
-        ret = torch.cat([batch['pixel_events'], batch['pixel_images']], dim=1)
-    else:
-        raise NotImplementedError(f'Not implemented control type')
-    return ret
-
-def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
-    # time.sleep(1.5 * 50 * 60)
-    local_rank = init_dist(launcher=launcher)
-    global_rank = distributed.get_rank()
-    num_processes = distributed.get_world_size()
-    is_main_process = (local_rank == 0)
     # create checkpoints and folders
     folder_name = name + datetime.datetime.now().strftime("-%Y-%m-%dT%H-%M-%S")
     folder_name = f'debug' if debug else folder_name
@@ -124,7 +81,7 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
     trainable_params += list(filter(lambda p: p.requires_grad, controlnet.parameters())) \
                        + list(filter(lambda p: p.requires_grad, cond_encoder.parameters()))
 
-    # gan_loss = GANLoss().to(local_rank)
+    # gan_loss = GANLoss().to(device)
     # gan_loss.requires_grad_(True)
     # trainable_params += list(filter(lambda p: p.requires_grad, gan_loss.parameters()))
 
@@ -136,8 +93,7 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
         eps=config.adam_epsilon
     )
     
-    if is_main_process:
-        print(f"trainable params: {sum(p.numel() for p in trainable_params) / 1e6:.3f} M")
+    print(f"trainable params: {sum(p.numel() for p in trainable_params) / 1e6:.3f} M")
 
     # enable gradient checkpointing
     if config.gradient_checkpointing:
@@ -146,26 +102,18 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
         controlnet.enable_gradient_checkpointing()
     
     # move to GPU
-    vae.to(local_rank)
-    text_encoder.to(local_rank)
-    unet.to(local_rank)
-    controlnet.to(local_rank)
-    cond_encoder.to(local_rank)
+    vae.to(device)
+    text_encoder.to(device)
+    unet.to(device)
+    controlnet.to(device)
+    cond_encoder.to(device)
 
     # create dataset and dataloader
     dataset = create_dataset(config.train_dataset)
-    distributed_sampler = DistributedSampler(
-        dataset,
-        num_replicas=num_processes,
-        rank=global_rank,
-        shuffle=True,
-        seed=config.global_seed
-    )
     dataloader = torch.utils.data.DataLoader(
         dataset, 
         batch_size = config.batch_size,
-        shuffle=False,
-        sampler=distributed_sampler,
+        shuffle=True,
         num_workers=config.num_workers,
         drop_last=True
     )
@@ -174,14 +122,7 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
     checkpointing_steps = config.checkpointing_steps
     gradient_accumulation_steps = config.gradient_accumulation_steps
     # diffusion iterations and learning rates
-    if max_train_steps == -1:
-        assert max_train_epoch != -1
-        max_train_steps = max_train_epoch * len(dataloader)
-    
-    if checkpointing_steps == -1:
-        assert checkpointing_epoch != -1
-        checkpointing_steps = checkpointing_epoch * len(dataloader)
-    
+
     lr_scheduler = get_scheduler(
         config.lr_sheduler_type,
         optimizer=optimizer, 
@@ -191,65 +132,51 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
     
     kwargs = {'unet':unet, 'vae': vae, 'tokenizer':tokenizer, 'text_encoder':text_encoder,
               'controlnet':controlnet, 'cond_encoder': cond_encoder, 'scheduler':noise_scheduler, 'isVal':True, 
-              'upsampler':vae}
+              'upsampler':vae, 'upsampler_w':None}
     validation_pipeline = create_pipeline(config.validation_pipeline, kwargs).to("cuda")
     validation_pipeline.enable_vae_slicing()
 
     num_update_steps_per_epoch = math.ceil(len(dataloader) / gradient_accumulation_steps)
     num_train_epochs = math.ceil(max_train_steps / num_update_steps_per_epoch)
 
-    total_batch_size = config.batch_size * num_processes * gradient_accumulation_steps
+    total_batch_size = config.batch_size * gradient_accumulation_steps
     
-    if is_main_process:
-        print("***** Running training *****")
-        print(f"  Num examples = {len(dataset)}")
-        print(f"  Num Epochs = {num_train_epochs}")
-        print(f"  Instantaneous batch size per device = {config.batch_size}")
-        print(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
-        print(f"  Gradient Accumulation steps = {gradient_accumulation_steps}")
-        print(f"  Total optimization steps = {max_train_steps}")
+    print("***** Running training *****")
+    print(f"  Num examples = {len(dataset)}")
+    print(f"  Num Epochs = {num_train_epochs}")
+    print(f"  Instantaneous batch size per device = {config.batch_size}")
+    print(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
+    print(f"  Gradient Accumulation steps = {gradient_accumulation_steps}")
+    print(f"  Total optimization steps = {max_train_steps}")
 
     
-    if is_main_process and (not debug) and use_wandb:
+    if (not debug) and use_wandb:
         wandb.init(project="HDR-diffu", name=folder_name, config=dict(config))
     
-    if is_main_process:
-        os.makedirs(out_folder, exist_ok=True)
-        os.makedirs(os.path.join(out_folder, 'images'), exist_ok=True)
-        os.makedirs(os.path.join(out_folder, 'checkpoints'), exist_ok=True)
-        OmegaConf.save(config, os.path.join(out_folder, 'config.yaml'))
+    os.makedirs(out_folder, exist_ok=True)
+    os.makedirs(os.path.join(out_folder, 'images'), exist_ok=True)
+    os.makedirs(os.path.join(out_folder, 'checkpoints'), exist_ok=True)
+    OmegaConf.save(config, os.path.join(out_folder, 'config.yaml'))
+    
         # save the code of test and pipeline
-        code_dir = os.path.join(out_folder, 'code')
-        os.makedirs(os.path.join(out_folder, 'code'), exist_ok=True)
-        train_file = os.path.join('Stage1+2.py')
-        os.system(f'cp {train_file} {code_dir}')
-        os.system(f'cp -r networks {code_dir}')
+    code_dir = os.path.join(out_folder, 'code')
+    os.makedirs(os.path.join(out_folder, 'code'), exist_ok=True)
+    train_file = 'train.py'
+    os.system(f'cp {train_file} {code_dir}')
+    os.system(f'cp -r networks {code_dir}')
 
     global_step = 0
     first_epoch = 0
 
-    progress_bar = tqdm(range(global_step, max_train_steps), disable=not is_main_process)
+    progress_bar = tqdm(range(global_step, max_train_steps))
     progress_bar.set_description('Steps')
 
-    accept_eta = 'eta' in set(inspect.signature(noise_scheduler.step).parameters.keys())
-    accept_generator = 'generator' in set(inspect.signature(noise_scheduler.step).parameters.keys())
-        
-    extra_step_kwargs = {}
-    if accept_eta:
-        extra_step_kwargs['eta'] = config.validation_setup.eta
-    if accept_generator:
-        extra_step_kwargs['generator'] = torch.Generator(device=local_rank)
-
-    vgg_loss = VGGLoss().to(local_rank)
-
     for epoch in range(first_epoch, num_train_epochs):
-        dataloader.sampler.set_epoch(epoch)
-
         for step, batch in enumerate(dataloader):
             # training
-            pixel_values = tonemap(batch["gts"]).to(local_rank) * 2 - 1
-            LDR = batch['pixel_images'].to(local_rank)
-            EVS = batch['pixel_events'].to(local_rank)
+            pixel_values = tonemap(batch["gts"]).to(device) * 2 - 1
+            LDR = batch['pixel_images'].to(device)
+            EVS = batch['pixel_events'].to(device)
             with torch.no_grad():
                 latents = vae.encode(pixel_values).latent_dist
                 latents = latents.sample()
@@ -259,15 +186,11 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
             noise = torch.randn_like(latents)
             _batch_size = latents.shape[0]
             
-            noise_scheduler.set_timesteps(config.noise_scheduler_kwargs.num_train_timesteps, device=local_rank)
+            noise_scheduler.set_timesteps(config.noise_scheduler_kwargs.num_train_timesteps, device=device)
             timesteps = torch.randint(0, noise_scheduler.config.num_train_timesteps, (_batch_size,)).long()
             timesteps = noise_scheduler.timesteps[timesteps]
             noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
             
-            # alpha_prod_t = noise_scheduler.alphas_cumprod[timesteps.detach().cpu()]
-            # beta_prod_t = 1 - alpha_prod_t
-            # weights_decay = beta_prod_t * beta_prod_t / alpha_prod_t / (1 - alpha_prod_t)
-
             with torch.no_grad():
                 prompt_ids = tokenizer(
                     [''] * _batch_size,
@@ -278,20 +201,19 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
                 ).input_ids.to(latents.device)
                 encoder_hidden_states = text_encoder(prompt_ids)[0]
             
-            condition_images, condition_list = cond_encoder(batch['pixel_images'].to(local_rank), batch['pixel_events'].to(local_rank))
+            condition_images, condition_list = cond_encoder(LDR, EVS)
             down_block_res_samples, mid_block_res_samples = controlnet(noisy_latents, timesteps, 
                                                             encoder_hidden_states=encoder_hidden_states, 
                                                             controlnet_cond=condition_list,
                                                             return_dict=False)
-            model_pred = unet(noisy_latents, timesteps.to(local_rank),
+            model_pred = unet(noisy_latents, timesteps.to(device),
                               encoder_hidden_states=encoder_hidden_states,
                               down_block_additional_residuals=down_block_res_samples,
-                            #   down_intrablock_additional_residuals=down_block_res_samples,
                               mid_block_additional_residual=mid_block_res_samples
                               ).sample
             
             if noise_scheduler.config.prediction_type == 'epsilon':
-                target = noise#noisy_latents - latents
+                target = noise
             elif noise_scheduler.config.prediction_type == 'v_prediction':
                 target = noise_scheduler.get_velocity(latents, noise, timesteps)
             else:
@@ -300,10 +222,9 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
             noise_scheduler.scale_model_input(noisy_latents, timesteps)
             original_pred_list = []
             for (model_pred_i, noisy_latents_i), timestep in zip(zip(model_pred.split(1), noisy_latents.split(1)), timesteps):
-                original_pred = noise_scheduler.step(model_pred_i.detach(), timestep.detach(), noisy_latents_i.detach()).pred_original_sample.to(local_rank)
+                original_pred = noise_scheduler.step(model_pred_i.detach(), timestep.detach(), noisy_latents_i.detach()).pred_original_sample.to(device)
                 original_pred_list.append(original_pred)
             original_pred = torch.cat(original_pred_list)
-            img_pred = vae.decode(original_pred / vae.config.scaling_factor).sample
 
             noise_loss = F.mse_loss(model_pred.float(), target.float(), reduction='mean')
             loss = noise_loss
@@ -318,11 +239,11 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
             global_step += 1
 
             # logging
-            if is_main_process and (not debug) and use_wandb:
+            if (not debug) and use_wandb:
                 wandb.log({'noise_loss': noise_loss.item()}, step=global_step)
 
             # saving
-            if is_main_process and (global_step % checkpointing_steps == 0 or step == len(dataloader) - 1):
+            if (global_step % checkpointing_steps == 0 or step == len(dataloader) - 1):
                 save_path = os.path.join(out_folder, 'checkpoints')
                 state_dict = {
                     'epoch': epoch,
@@ -338,7 +259,7 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
                 print(f'saving model to {save_path} with global step {global_step}')
             
             # validation
-            if is_main_process and (global_step % config.validation_steps == 0):
+            if (global_step % config.validation_steps == 0):
                 generator = torch.Generator(device=latents.device)
                 generator.manual_seed(config.global_seed)
 
@@ -346,18 +267,14 @@ def main(name, launcher, config, use_wandb=False, debug=False, pretrained=""):
                 width = config.train_dataset.patch_size if isinstance(config.train_dataset.patch_size, int) else config.train_dataset.patch_size[1]
 
                 with torch.no_grad():
-                    results, sample, latent = validation_pipeline(prompt=encoder_hidden_states, 
+                    sample, results, latent = validation_pipeline(prompt=encoder_hidden_states, 
                                                 condition_images=batch['pixel_images'], 
                                                 condition_events=batch['pixel_events'], 
                                                 height=height, width=width, 
                                                 generators=generator, 
                                                 **config.validation_setup)
 
-                sub_out = torch.clamp((sample.detach() + 1) / 2, 0, 1)
-                sub_gt = torch.clamp((pixel_values.detach() + 1) / 2, 0, 1)
-            
                 visuals = {}
-                visuals[f'{global_step}_results_tm'] = (results + 1) / 2
                 visuals[f'{global_step}_results_sample'] = (sample + 1) / 2
                 visuals[f'{global_step}_events'] = batch['pixel_events']
                 visuals[f'{global_step}_images'] = batch['pixel_images']
@@ -375,7 +292,6 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--config",   type=str, required=True)
     parser.add_argument("--pretrained", type=str, default="")
-    parser.add_argument("--launcher", type=str, choices=["pytorch", "slurm"], default="pytorch")
     parser.add_argument("--wandb",    action="store_true")
     parser.add_argument("--debug",    action="store_true")
     parser.add_argument("--name",  type=str, default="")
@@ -385,4 +301,4 @@ if __name__ == '__main__':
     
     config = OmegaConf.load(args.config)
 
-    main(name=name, launcher=args.launcher, use_wandb=args.wandb, config=config, debug=args.debug, pretrained=args.pretrained)
+    main(name=name, use_wandb=args.wandb, config=config, debug=args.debug, pretrained=args.pretrained)

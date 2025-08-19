@@ -1,5 +1,4 @@
 import torch
-from utils import BGR2YCbCr, Gaussian_filtering
 from .submodules import *
 
 class Conv2DBlock(nn.Module):
@@ -78,39 +77,6 @@ class UEncoder4Recurrent(nn.Module):
         e4 = self.Conv4(e4)
 
         return [e1, e2, e3, e4], [state2, state3, state4]
-
-class UEncoder4_small(nn.Module):
-    def __init__(self, in_channels=3):
-        super(UEncoder4_small, self).__init__()
-
-        n1 = 64
-        filters = [n1, n1 * 2, n1 * 4, n1 * 8, n1 * 16]
-        
-        self.Maxpool1 = nn.Conv2d(filters[0], filters[0], kernel_size=5, padding=2, stride=2)#nn.MaxPool2d(kernel_size=2, stride=2)
-        self.Maxpool2 = nn.Conv2d(filters[1], filters[1], kernel_size=5, padding=2, stride=2)#nn.MaxPool2d(kernel_size=2, stride=2)
-        self.Maxpool3 = nn.Conv2d(filters[2], filters[2], kernel_size=5, padding=2, stride=2)#nn.MaxPool2d(kernel_size=2, stride=2)
-
-        self.Conv1 = Conv2DBlock1(in_channels, filters[0], norm='IN')
-        self.Conv2 = Conv2DBlock1(filters[0], filters[1], norm='IN')
-        self.Conv3 = Conv2DBlock1(filters[1], filters[2], norm='IN')
-        self.Conv4 = Conv2DBlock1(filters[2], filters[3], norm='IN')
-
-
-    def forward(self, x, prev_states):
-
-        e1 = self.Conv1(x)
-
-        e2 = self.Maxpool1(e1)
-        e2 = self.Conv2(e2)
-
-        e3 = self.Maxpool2(e2)
-        e3 = self.Conv3(e3)
-        
-        e4 = self.Maxpool3(e3)
-        e4 = self.Conv4(e4)
-
-        return [e1, e2, e3, e4], prev_states
-
 
 class UDecoder4(nn.Module):
     def __init__(self, out_channels=3):

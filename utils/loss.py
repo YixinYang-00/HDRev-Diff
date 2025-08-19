@@ -53,25 +53,6 @@ def gaussian_map(h, w, mu=0, sigma=1):
     gauss = 1 / (2 * math.pi * sigma ** 2) * torch.exp(-((x - mu) ** 2 + (y - mu) ** 2) / (2 * sigma ** 2))
     return gauss.unsqueeze(0).unsqueeze(0)
 
-class FFTLoss(nn.Module):
-
-    def __init__(self, reduction='sum'):
-        super(FFTLoss, self).__init__()
-        if reduction not in ['none', 'mean', 'sum']:
-            raise ValueError(f'Unspported reduction mode: {reduction}')
-        self.reduction = reduction
-
-    def forward(self, pred, target):
-        pred_fft = torch.fft.rfft2(pred)
-        target_fft = torch.fft.rfft2(target)
-        b, c, h, w = target_fft.shape
-        gaussian_mask = 1 - gaussian_map(h, w)
-        gaussian_mask = gaussian_mask - torch.min(gaussian_mask)
-        gaussian_mask = (gaussian_mask / torch.sum(gaussian_mask)).to(pred_fft.device)
-        # print(torch.max(gaussian_mask), torch.min(gaussian_mask), torch.sum(gaussian_mask))
-        fftloss = F.l1_loss(pred_fft * gaussian_mask, target_fft * gaussian_mask, reduction=self.reduction)
-        return fftloss
-
 def normalize_batch(batch, final_func='sig'):
     # normalize using imagenet mean and std
     if final_func == 'tanh':

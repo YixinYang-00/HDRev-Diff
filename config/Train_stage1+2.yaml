@@ -42,7 +42,7 @@ noise_scheduler_kwargs:
 
 train_dataset:
   dataset_type: evs_image_h5
-  dataroot: "train_collect/"
+  dataroot: "train"
 
   isTrain: True
   patch_size: [512, 512]
@@ -54,7 +54,7 @@ train_dataset:
   event_representation: voxel_grid
 
 validation_pipeline: Stage
-validation_steps: 1
+validation_steps: 1000
 validation_setup:
   num_inference_steps: 9
   eta: 1.0

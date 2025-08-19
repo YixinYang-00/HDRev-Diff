@@ -1,6 +1,6 @@
 output_dir: checkpoints
-pretrained_model_path: runwayml/stable-diffusion-v1-5
-pretrained_controlnet_model_path: lllyasviel/control_v11e_sd15_ip2p
+pretrained_model_path: "stable-diffusion-v1-5/stable-diffusion-v1-5"
+pretrained_controlnet_model_path: 'lllyasviel/control_v11e_sd15_ip2p' 
 gradient_checkpointing: false
 use_image_prompt: false
 control_type: evs+ldr
@@ -40,15 +40,7 @@ noise_scheduler_kwargs:
   prediction_type: epsilon
 train_dataset:
   dataset_type: evs_image_h5single
-  dataroot: /openbayes/input/input0/predecode/Test_-2025-05-12T05-27-08/inputs_w_latents.h5 
-  # dataroot: /openbayes/input/input1/denoisefin_wUnder01.h5
-  # dataroot: /openbayes/input/input0/predecode/Test_continue_newAdapt-2024-12-03T13-14-11/inputs_w_latents.h5
-  # dataroot: /openbayes/input/input0/predecode/Test_denoiseContinue_/openbayes/input/input1/denoise_continue.ckpt-2024-11-11T10-09-49/inputs_w_latents.h5
-  # dataroot: /openbayes/input/input0/predecode/Test_-2024-11-12T17-13-12/inputs_w_latents_woFusion.h5
-  # dataroot: /openbayes/input/input0/predecode/Test_continue_/openbayes/input/input1/denoise_continue.ckpt-2024-11-14T03-12-22/inputs_w_latents.h5
-  # dataroot: /openbayes/input/input1/continue_new.h5
-  # dataroot: /openbayes/input/input0/predecode/Test__/openbayes/input/input0/woUp.ckpt-2024-11-07T05-30-26/inputs_w_latents.h5
-  # dataroot: /openbayes/input/input0/predecode/Test_removeFusion-2024-11-19T07-57-41/inputs_w_latents.h5
+  dataroot: results/Test_-2025-08-19T23-56-23/inputs_w_latents.h5
   isTrain: true
   patch_size:
   - 512
