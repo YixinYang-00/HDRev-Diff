@@ -64,7 +64,7 @@ python train_upsampler.py \
 ```
 
 ### Testing
-
+Download checkpoint: [GoogleDrive](https://drive.google.com/drive/folders/1Jmjkc4itLE-QagcCEpnCGtvh-z5QUlfz?usp=share_link)
 ```bash
 python test.py \
     --exp_name "test_experiment" \
